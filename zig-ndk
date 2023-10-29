@@ -1,0 +1,202 @@
+#!/bin/sh
+set -eu
+
+msg() {
+	if test $# -gt 0; then
+		printf "$@\n" '' 1>&2
+	elif ! test -t 0; then
+		printf "$(cat)\n" '' 1>&2
+	fi
+}
+info() { msg "${SCRIPT_NAME}:Info: $*"; }
+err() { msg "${SCRIPT_NAME}:Error: $*" && exit 1; }
+err_args_not_handled() { err "argument not handled: [$1]"; }
+
+command_test() {
+	msg ""
+	msg "Test compiling C hello world progarm ..."
+	zig clang \
+		--sysroot="$(zig clang -print-resource-dir)/sysroot" \
+		--target=aarch64-linux-android24 \
+		-x c - \
+		-o hello-c \
+		"$@" \
+		<<-EOF
+			#include <stdio.h>
+
+			int main() {
+			    printf("%s\n", "Hello, C!");
+			    return 0;
+			}
+		EOF
+
+	msg "Information of hello-c"
+	file hello-c
+	msg "Run ./hello-c"
+	./hello-c
+
+	msg ""
+	msg "Test compiling C++ hello world program ..."
+	zig clang \
+		--sysroot="$(zig clang -print-resource-dir)/sysroot" \
+		--target=aarch64-linux-android24 \
+		-lc++ \
+		-x c++ - \
+		-o hello-cpp \
+		"$@" \
+		<<-EOF
+			#include <iostream>
+			using namespace std;
+			 
+			int main() {
+			    cout << "Hello, C++!\n";
+			    return 0;
+			}
+		EOF
+
+	msg "Information of hello-cpp"
+	file hello-cpp
+	msg "Run ./hello-cpp"
+	./hello-cpp
+}
+
+create_wrapper() {
+	if test $# -eq 1 && ! test -t 0; then
+		echo "Create wrapper $1" >&2
+		wrapper="$(dirname $(command -v zig))/$1"
+		cat >"${wrapper}"
+		chmod +x "${wrapper}"
+	else
+		err "create_wrapper: failed"
+	fi
+}
+
+create_wrappers() {
+	cat <<-EOF | create_wrapper ld.lld
+		#!/bin/sh
+		zig ld.lld "\$@"
+	EOF
+
+	msg "Create wrapper ld"
+	zig_install_dir="$(dirname $(command -v zig))"
+	(cd "${zig_install_dir}" && ln -snf ld.lld ld)
+
+	cat <<'EOF' | create_wrapper clang
+#!/bin/sh
+zig clang \
+	--sysroot=$(zig clang -print-resource-dir)/sysroot \
+	--target=aarch64-linux-android24 \
+	"$@"
+EOF
+
+	cat <<'EOF' | create_wrapper clang++
+#!/bin/sh
+clang -lc++ \
+	"$@"
+EOF
+
+	cat <<-'EOF' | create_wrapper ar
+		#!/bin/sh
+		zig ar "\$@"
+	EOF
+}
+
+remove_wrappers() {
+	if cd $(dirname $(command -v zig)); then
+		rm ld.lld ld clang clang++ ar
+	fi
+}
+
+command_setup() {
+	if test $# -eq 1; then
+		if test -d "$1"; then
+			ANDROID_NDK_HOME="$1"
+		else
+			err "dir not exists: [$1]"
+		fi
+	elif test "${ANDROID_NDK_HOME+1}"; then
+		if ! test -d "${ANDROID_NDK_HOME}"; then
+			err "found ANDROID_NDK_HOME=${ANDROID_NDK_HOME}, but dir not exists"
+		fi
+	else
+		info "Usage: ${SCRIPT_NAME} setup [NDK_DIR]"
+		err "please specify ndk_dir or export ANDROID_NDK_HOME"
+	fi
+
+	if command -v zig >/dev/null 2>&1; then
+		## zig
+		zig_resource_dir="$(zig clang -print-resource-dir)"
+		msg "zig_resource_dir=${zig_resource_dir}"
+
+		## ndk
+		ndk_resource_dir="$(find "${ANDROID_NDK_HOME}" -path '*/lib/clang/[0-9]?')"
+		msg "ndk_resource_dir=${ndk_resource_dir}"
+		ndk_sysroot="$(find ${ANDROID_NDK_HOME} -name sysroot -type d)"
+		msg "ndk_sysroot=${ndk_sysroot}"
+		msg ""
+
+		## Copy files
+		mkdir -p $(zig clang -print-resource-dir)
+		msg "Copying ndk_resource_dir to zig_resource_dir ..."
+		cp -r "${ndk_resource_dir}" $(dirname ${zig_resource_dir})
+
+		## For Convevience, we copy ndk_sysroot into zig_runtime_dir
+		msg "Copying ndk_sysroot to zig_resource_dir ..."
+		cp -r "${ndk_sysroot}" "${zig_resource_dir}"
+
+		create_wrappers
+		command_test "-s"
+		remove_wrappers
+	else
+		err "command zig not found."
+	fi
+}
+
+main_func() {
+	SCRIPT_NAME="$(basename $0)"
+	_show_help() {
+		msg <<-EOF
+			Provide zig with the ability to compile for android
+
+			Usage:
+			  ${SCRIPT_NAME} [OPTION...] [COMMAND]
+
+			Options:
+			  -h,--help   show this help
+
+			Commands:
+			   setup setup ndk
+			   test   test compiling c and c++
+			   
+		EOF
+	}
+
+	if test $# -gt 0; then
+		while test $# -gt 0; do
+			case "$1" in
+			-h | --help)
+				_show_help
+				break
+				;;
+			setup)
+				shift
+				command_setup "$@"
+				break
+				;;
+			test)
+				shift
+				command_test "$@"
+				break
+				;;
+			*)
+				err_args_not_handled "$1"
+				shift
+				;;
+			esac
+		done
+	else
+		_show_help
+	fi
+}
+
+main_func "$@"
