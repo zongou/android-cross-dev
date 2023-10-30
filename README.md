@@ -1,4 +1,4 @@
-# zig-ndk
+# mini-ndk
 
 Provide zig with the ability to compile for android targeted binary.
 
