@@ -1,0 +1,6 @@
+bin
+ndk_root
+resource
+sysroot
+tests/output
+a.out

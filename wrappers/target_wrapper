@@ -1,0 +1,56 @@
+#!/bin/sh
+set -eu
+
+TOOLCHAIN=$(dirname "$(dirname "$(realpath "$0")")")
+RESOURCE_DIR=${TOOLCHAIN}/resource
+SYSROOT=${TOOLCHAIN}/sysroot
+TARGET=aarch64-linux-android21
+
+CLANG=${CLANG-clang}
+CLANGXX=${CLANGXX-clang++}
+
+EXE=$(basename "$0")
+case "${EXE}" in
+clang | clang++ | *-linux-android*-clang | *-linux-android*-clang++)
+	case "${EXE}" in
+	clang | *-linux-android*-clang) BIN=${CLANG-clang} ;;
+	clang++ | *-linux-android*-clang++) BIN=${CLANGXX-clang} ;;
+	esac
+
+	if ! test "${1+1}" || { test "${1+1}" && ! test "$1"x = "-cc1"x; }; then
+		## Get target triple
+		case "${EXE}" in
+		*-linux-android*-clang | *-linux-android*-clang++)
+			TARGET=$(echo "${EXE}" | grep -E -o "(aarch64|x86_64|i686|riscv64)-linux-android[1-9]+|armv7a-linux-androideabi[1-9]+")
+			;;
+		esac
+
+		if ${BIN} -v 2>&1 | grep -q llvmbox; then
+			## These options are necessarily for llvmbox
+			sys_include_dir="${SYSROOT}/usr/include/$(echo "${TARGET}" | sed 's/armv7a/arm/' | sed -E 's/(android(eabi)?)[0-9]+/\1/')"
+			set -- "$@" \
+				-isystem "${SYSROOT}/usr/include/c++/v1" \
+				-isystem "${SYSROOT}/usr/include" \
+				-isystem "${sys_include_dir}"
+		elif ${BIN} -v 2>&1 | grep -q alpine; then
+			set -- "$@" -B "${TOOLCHAIN}/wrappers/alpine"
+		elif ${BIN} -v 2>&1 | grep -q zig; then
+			set -- "$@" -B "${TOOLCHAIN}/wrappers/zig"
+		fi
+
+		set -- \
+			-B "${TOOLCHAIN}/bin" \
+			-resource-dir "${RESOURCE_DIR}" \
+			--sysroot="${SYSROOT}" \
+			--target="${TARGET}" \
+			"$@"
+	fi
+	;;
+*)
+	# shellcheck disable=SC2059
+	printf "Usage:\n  ln -s ${EXE} aarch64-linux-android24-clang\n"
+	exit 1
+	;;
+esac
+
+${BIN} "$@"
