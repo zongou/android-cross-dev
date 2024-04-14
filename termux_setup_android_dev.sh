@@ -54,7 +54,7 @@ setup_sdk() {
 
 setup_ndk() {
 	msg "Setting up NDK ..."
-	NDK_VERSION=r26c
+	NDK_VERSION=r26d
 	ANDROID_NDK_HOME="${PREFIX}/lib/android-ndk-${NDK_VERSION}"
 	NDK_PACKAGE="${RES_DIR}/android-ndk-${NDK_VERSION}-linux.zip"
 	NDK_URL="https://dl.google.com/android/repository/android-ndk-${NDK_VERSION}-linux.zip"
